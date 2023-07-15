@@ -48,122 +48,15 @@ class ConvoBuffer:
 #     for res in openai.Completion.create(model="text-davinci-003", prompt=prompt,  max_tokens=7, temperature=0, stream=True, logprobs=5):
 #         yield res["choices"][0]["text"], res["choices"][0]["logprobs"]["token_logprobs"]
 
+tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
+model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
+
 async def process_buffer(text):
     res = await openai.Completion.acreate(model="text-davinci-003", prompt=text,  max_tokens=32, temperature=0, stream=True, logprobs=5)
     return text, res["choices"][0]["text"], res["choices"][0]["logprobs"]["token_logprobs"]
 
 def translate(text, translated_conversation_history, untranslated_conversation_history):
-    return None, None
-
-import multiprocessing
-import threading
-from multiprocessing import Queue
-import subprocess
-
-# def audio_to_play(q: Queue):
-#     while True:
-#         if not q.empty():
-#             print("playing audio")
-#             audio = q.get()
-#             play(audio)
-#             print("played audio")
-
-
-# def audio_to_play(q: Queue):
-#     args = ["ffplay", "-autoexit", "-", "-nodisp"]
-#     proc = subprocess.Popen(
-#         args=args,
-#         stdout=subprocess.PIPE,
-#         stdin=subprocess.PIPE,
-#         stderr=subprocess.PIPE,
-#         bufsize=0
-#     )
-#     done = False
-#     while not done:
-#         # Feed audio data into the subprocess
-#         if not q.empty():
-#             chunk = q.get()
-#             if chunk is None:
-#                 print("Killing player")
-#                 # Close the input stream to signal to ffplay that there is no more data coming
-#                 proc.stdin.close()
-#                 proc.wait()
-#                 done = True
-#             else:
-#                 print("Sending audio chunk")
-#                 proc.stdin.write(chunk)
-#                 proc.stdin.flush()
-
-# args = ["ffplay", "-autoexit", "-", "-nodisp"]
-# proc = subprocess.Popen(
-#     args=args,
-#     stdout=subprocess.PIPE,
-#     stdin=subprocess.PIPE,
-#     stderr=subprocess.PIPE,
-#     bufsize=0
-# )
-# audio = generate(
-#     text="Getting started",
-#     voice="Arnold",
-#     model="eleven_monolingual_v1",
-# )
-# proc.stdin.write(audio)
-# proc.stdin.flush()
-
-# def audio_to_play(q: Queue):
-#     mpv_command = ["mpv", "--no-cache", "--no-terminal", "--", "fd://0"]
-#     mpv_process = subprocess.Popen(
-#         mpv_command,
-#         stdin=subprocess.PIPE,
-#         stdout=subprocess.DEVNULL,
-#         stderr=subprocess.DEVNULL,
-#     )
-
-#     done = False
-#     while not done:
-#         if not q.empty():
-#             chunk = q.get()
-#             if chunk is None:
-#                 done = True
-#                 print("Finished TTS")
-#             else:
-#                 print("Processing chunk")
-#                 mpv_process.stdin.write(chunk)  # type: ignore
-#                 mpv_process.stdin.flush()  # type: ignore
-
-#     if mpv_process.stdin:
-#         mpv_process.stdin.close()
-#     mpv_process.wait()
-
-lock = threading.Lock()
-
-mpv_command = ["mpv", "--no-cache", "--no-terminal", "--", "fd://0"]
-mpv_process = subprocess.Popen(
-    mpv_command,
-    stdin=subprocess.PIPE,
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
-)
-
-def generate_audio(q: Queue, text):
-    print("Generating aufio for:", text)
-    audio = generate(
-        text=text,
-        voice="Arnold",
-        model="eleven_monolingual_v1",
-        stream=True
-    )
-    lock.acquire()
-    for chunk in audio:
-        if chunk is not None:
-            mpv_process.stdin.write(chunk)  # type: ignore
-            mpv_process.stdin.flush()  # type: ignore
-
-    # if mpv_process.stdin:
-    #     mpv_process.stdin.close()
-    # mpv_process.wait()    
-    lock.release()
-
+    return text, None, None
 
 class Translator:
     def __init__(self) -> None:
