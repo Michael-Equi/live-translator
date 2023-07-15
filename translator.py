@@ -3,8 +3,9 @@ import asyncio
 import os 
 import dotenv
 import time
-import atexit
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from elevenlabs import set_api_key, generate, play, stream
+import threading
 import torch
 from multiprocessing import Queue
 
@@ -55,10 +56,10 @@ class ConvoBuffer:
 tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
 model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
 
-async def process_buffer(text):
+"""async def process_buffer(text):
     res = await openai.Completion.acreate(model="text-davinci-003", prompt=text,  max_tokens=32, temperature=0, stream=True, logprobs=5)
     return text, res["choices"][0]["text"], res["choices"][0]["logprobs"]["token_logprobs"]
-
+"""
 def translate(left_to_translate, translated_conversation_history, untranslated_conversation_history):
     input_text = untranslated_conversation_history + left_to_translate
     encoded_input = tokenizer.encode(input_text, return_tensors="pt")
