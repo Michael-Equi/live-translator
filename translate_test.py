@@ -6,8 +6,9 @@ model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
 
 input_text = "你好我叫张宝了"
 encoded_input = tokenizer.encode(input_text, return_tensors="pt")
-generated_text = "Hello,"
+generated_text = "HHeyy"
 encoded_pre_generation = tokenizer.encode(generated_text, return_tensors="pt")[0][:-1].unsqueeze(0)
+encoded_pre_generation = torch.cat((torch.tensor(tokenizer.pad_token_id).unsqueeze(0), encoded_pre_generation[0]), dim=0).unsqueeze(0)
 print(encoded_input)
 print(encoded_pre_generation)
 
