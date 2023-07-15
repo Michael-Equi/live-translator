@@ -10,22 +10,46 @@ import torch
 from multiprocessing import Queue
 import subprocess
 
-# dotenv.load_dotenv()
-# openai.api_key = os.environ["OPENAI_API_KEY"]
-# openai.organization = os.environ["OPENAI_ORG"]
-
 dotenv.load_dotenv()
 set_api_key(os.environ["ELEVEN_LABS_API_KEY"])
 
-class Source:
-    def __init__(self) -> None:
-        pass
-    pass
+class TTS:
+    
+    def __init__(self):
+        self.lock = threading.Lock()
+        mpv_command = ["mpv", "--no-cache", "--no-terminal", "--", "fd://0"]
+        self.mpv_process = subprocess.Popen(
+            mpv_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
-class Sink:
+    def send(self, text):
+        # generate audio in a separate thread
+        t = threading.Thread(target=self.generate_audio, args=(text,))
+        t.start()
+        return t
 
-    def __init__(self, source):
-        pass
+    def generate_audio(self, text):
+        audio = generate(
+            text=text,
+            voice="Arnold",
+            model="eleven_monolingual_v1",
+            stream=True
+        )
+        self.lock.acquire()
+        for chunk in audio:
+            if chunk is not None:
+                self.mpv_process.stdin.write(chunk)
+                self.mpv_process.stdin.flush()
+        self.lock.release()
+
+    def __del__(self):
+        if self.mpv_process.stdin:
+            self.mpv_process.stdin.close()
+        self.mpv_process.wait()    
+
 
 class ConvoBuffer:
     def __init__(self) -> None:
@@ -43,14 +67,6 @@ class ConvoBuffer:
 
     def get_text(self):
         return self.convo_buffer
-
-# print(x["choices"][0]["logprobs"]["token_logprobs"])
-# print(x["choices"][0]["text"])
-
-# def callgpt(prompt):
-#     # Stream from openai
-#     for res in openai.Completion.create(model="text-davinci-003", prompt=prompt,  max_tokens=7, temperature=0, stream=True, logprobs=5):
-#         yield res["choices"][0]["text"], res["choices"][0]["logprobs"]["token_logprobs"]
 
 tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
 model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
@@ -93,34 +109,6 @@ def translate(left_to_translate, translated_conversation_history, untranslated_c
     translated_text = tokenizer.decode(tokens_list, skip_special_tokens=True)
     return translated_text, log_probabilities
 
-lock = threading.Lock()
-
-mpv_command = ["mpv", "--no-cache", "--no-terminal", "--", "fd://0"]
-mpv_process = subprocess.Popen(
-    mpv_command,
-    stdin=subprocess.PIPE,
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
-)
-
-def generate_audio(q: Queue, text):
-    print("Generating aufio for:", text)
-    audio = generate(
-        text=text,
-        voice="Arnold",
-        model="eleven_monolingual_v1",
-        stream=True
-    )
-    lock.acquire()
-    for chunk in audio:
-        if chunk is not None:
-            mpv_process.stdin.write(chunk)  # type: ignore
-            mpv_process.stdin.flush()  # type: ignore
-
-    # if mpv_process.stdin:
-    #     mpv_process.stdin.close()
-    # mpv_process.wait()    
-    lock.release()
 
 class Translator:
     def __init__(self) -> None:
@@ -128,21 +116,11 @@ class Translator:
         self.untranslated_text = ""
         self.untranslated_conversation_history = ""
         self.translated_conversation_history = ''
-        # Output of stt
-        # self.stt_buffer = ConvoBuffer()
 
-        self.tts_q = Queue()
-        # self.player = multiprocessing.Process(target=audio_to_play, args=(self.tts_q,))
-        # self.player.start()
-        # atexit.register(self.player.terminate)
-
-    def __del__(self):
-        # self.player.terminate()
-        pass
+        self.tts = TTS()
 
     def send_to_tts(self, text):
-        # Generate audio in another thread
-        threading.Thread(target=generate_audio, args=(self.tts_q, text)).start() 
+        self.tts.send(text)
 
     def process_translation(self, text, translation, logprobs, threshold = 0.5):
         if sum(logprobs) / len(logprobs) > threshold:
@@ -160,7 +138,6 @@ class Translator:
         if translation is not None:
             self.send_to_tts(translation)
 
-
     def process_translation_async(self, text, translation, logprobs, threshold = 0.5):
         # Check if the text has already been added to the conversation history
         if len(self.translated_text) >= len(text) and text == self.translated_text[-len(text):]:
@@ -173,27 +150,11 @@ class Translator:
                 self.conversation_history += self.convbuff.pop(translation)
                 self.send_to_tts(translation)
 
-    def add_chunk_async(self, text):
-        # Receive chunk from TTS stream
-        self.convbuff.add(text["choices"][0])
-        # Send to translation process
-        task = asyncio.create_task(process_buffer(self.convbuff.get_text()))
-        # Add done callback
-        task.add_done_callback(self.process_translation_async)
-
-
 
 def main():
     translator = Translator()
-    print("Sending to tts")
-    translator.send_to_tts("What is your favorite")
-    print("Sent to tts")
-    translator.send_to_tts("color?")
-    time.sleep(10)
-    print("Sending to tts")
-    translator.send_to_tts("What is your favorite")
-    print("Sent to tts")
-    translator.send_to_tts("color?")
+    translator.send_to_tts("What is your favorite color.")
+    translator.send_to_tts("My favorite color is blue!")
 
 if __name__ == '__main__':
     main()
