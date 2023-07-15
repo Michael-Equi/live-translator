@@ -1,11 +1,9 @@
-import openai
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import dotenv
 import os
 import asyncio
 
 dotenv.load_dotenv()
-openai.api_key = os.environ["OPENAI_API_KEY"]
-openai.organization = os.environ["OPENAI_ORG"]
 
 class Source:
     def __init__(self) -> None:
@@ -41,15 +39,21 @@ class ConvoBuffer:
 #         yield res["choices"][0]["text"], res["choices"][0]["logprobs"]["token_logprobs"]
 
 async def process_buffer(text):
-    res = await openai.Completion.acreate(model="text-davinci-003", prompt=text,  max_tokens=32, temperature=0, stream=True, logprobs=5)
-    return res["choices"][0]["text"], res["choices"][0]["logprobs"]["token_logprobs"]
+    #res = await openai.Completion.acreate(model="text-davinci-003", prompt=text,  max_tokens=32, temperature=0, stream=True, logprobs=5)
+    #return res["choices"][0]["text"], res["choices"][0]["logprobs"]["token_logprobs"]
 
 class Translator:
     def __init__(self) -> None:
         self.convbuff = ConvoBuffer()
         self.output_buffer = ConvoBuffer()
+        self.tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
+        self.model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
 
-    def process_translation(self, )
+
+    def process_translation(self, input_text):
+        encoded_input = self.tokenizer.encode(input_text, return_tensors="pt")
+        translation = self.model.generate(encoded_input, max_length=128)
+        return self.tokenizer.decode(translation[0], skip_special_tokens=True)
 
     def add_chunk(self, text):
         # Receive chunk from TTS stream
