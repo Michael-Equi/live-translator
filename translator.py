@@ -8,8 +8,7 @@ from elevenlabs import set_api_key, generate, play, stream
 import threading
 import torch
 from multiprocessing import Queue
-
-
+import subprocess
 
 # dotenv.load_dotenv()
 # openai.api_key = os.environ["OPENAI_API_KEY"]
@@ -94,6 +93,34 @@ def translate(left_to_translate, translated_conversation_history, untranslated_c
     translated_text = tokenizer.decode(tokens_list, skip_special_tokens=True)
     return translated_text, log_probabilities
 
+lock = threading.Lock()
+
+mpv_command = ["mpv", "--no-cache", "--no-terminal", "--", "fd://0"]
+mpv_process = subprocess.Popen(
+    mpv_command,
+    stdin=subprocess.PIPE,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+def generate_audio(q: Queue, text):
+    print("Generating aufio for:", text)
+    audio = generate(
+        text=text,
+        voice="Arnold",
+        model="eleven_monolingual_v1",
+        stream=True
+    )
+    lock.acquire()
+    for chunk in audio:
+        if chunk is not None:
+            mpv_process.stdin.write(chunk)  # type: ignore
+            mpv_process.stdin.flush()  # type: ignore
+
+    # if mpv_process.stdin:
+    #     mpv_process.stdin.close()
+    # mpv_process.wait()    
+    lock.release()
 
 class Translator:
     def __init__(self) -> None:
