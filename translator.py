@@ -57,7 +57,8 @@ class Translator:
         if len(self.translated_text) >= len(text) and text == self.translated_text[-len(text):]:
             # Text has already been translated
             return 
-        elif 
+        elif True:
+            # TODO check if part of the text has already been translated
             # Sum the logprobs and divide by length
             if sum(logprobs) / len(logprobs) > threshold:
                 self.conversation_history += self.convbuff.pop(translation)
