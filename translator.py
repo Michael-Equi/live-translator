@@ -130,7 +130,10 @@ class AzureTTS:
                 if data is not None and len(data) > 0:
                     # Convert the data from a list of bytes to a single bytes objects
                     # TODO Ugh the bottle necks is this lol
-                    self.audio_stream.write(b''.join(data))
+                    bytes_data = b''.join(data)
+                    # Remove any zeros from the begining and end of data
+                    bytes_data = bytes_data.lstrip(b'\x00').rstrip(b'\x00')
+                    self.audio_stream.write(bytes_data)
  
     def send(self, text):
         # generate audio in a separate thread
@@ -463,8 +466,13 @@ def process_utterances():
 
 def main():
     translator = Translator()
-    translator.send_to_tts("What is your favorite color.")
-    translator.send_to_tts("My favorite color is blue!")
+    translator.send_to_tts("Hello")
+    translator.send_to_tts("my")
+    translator.send_to_tts("name")
+    translator.send_to_tts("is")
+    translator.send_to_tts("John!")
+    translator.send_to_tts("What is your favorite")
+    translator.send_to_tts("color. My favorite color is blue!")
 
 if __name__ == '__main__':
     main()
