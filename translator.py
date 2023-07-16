@@ -1,20 +1,172 @@
-import openai
-import asyncio
 import os 
 import dotenv
-import time
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from elevenlabs import set_api_key, generate, play, stream
 import threading
 import torch
 from multiprocessing import Queue
 import subprocess
+import azure.cognitiveservices.speech as speechsdk
+from collections import defaultdict
+import time
+
+import os, pyaudio
+pa = pyaudio.PyAudio()
 
 dotenv.load_dotenv()
 set_api_key(os.environ["ELEVEN_LABS_API_KEY"])
 
-class TTS:
+class OrderedStream:
     
+    def __init__(self) -> None:
+        self.buffer = defaultdict(lambda: [])
+        self.read_idx = 0
+        self.completed_idx = set()
+        self.lock = threading.Lock()
+        
+    def empty(self):
+        return len(self.buffer) == 0
+
+    def write(self, idx, buffer):
+        self.lock.acquire()
+        self.buffer[idx].append(buffer)
+        self.lock.release()
+
+    def read(self):
+        if self.read_idx in self.buffer.keys():
+            self.lock.acquire()
+            tmp_idx = self.read_idx
+            if self.read_idx in self.completed_idx:
+                self.read_idx += 1
+            data = self.buffer.pop(tmp_idx)
+            self.lock.release()
+            return data
+        else:
+            # Buffer empty
+            return None
+
+    def completed(self, idx):
+        self.completed_idx.add(idx)
+
+class PushAudioOutputStreamSampleCallback(speechsdk.audio.PushAudioOutputStreamCallback):
+    """
+    Example class that implements the PushAudioOutputStreamCallback, which is used to show
+    how to push output audio to a stream
+    """
+    def __init__(self, stream: OrderedStream, stream_lock: threading.Lock, idx: int) -> None:
+        super().__init__()
+        self._audio_data = bytes(0)
+        self._closed = False
+        self.stream = stream
+        # self.stream_lock = stream_lock
+        self.idx = idx
+
+
+    def write(self, audio_buffer: memoryview) -> int:
+        """
+        The callback function which is invoked when the synthesizer has an output audio chunk
+        to write out
+        """
+        self._audio_data += audio_buffer
+        self.stream.write(self.idx, audio_buffer.tobytes())  # Convert memoryview to bytes
+        # print("{} bytes received.".format(audio_buffer.nbytes))
+        return audio_buffer.nbytes
+
+    def close(self) -> None:
+        """
+        The callback function which is invoked when the synthesizer is about to close the
+        stream.
+        """
+        self._closed = True
+        self.stream.completed(self.idx)
+        print("Push audio output stream closed.")
+
+    def get_audio_data(self) -> bytes:
+        return self._audio_data
+
+    def get_audio_size(self) -> int:
+        return len(self._audio_data)
+    
+        
+class AzureTTS:
+
+    def __init__(self):
+        self.idx = 0
+        self.audio_lock = threading.Lock()
+        self.lock = threading.Lock()
+        voc_data = {
+            'channels': 1, # Mono sound
+            'rate': 16000, # 16KHz
+            'width': 2, # 16 bit depth = 2 bytes
+            'format': pyaudio.paInt16, # 16 bit depth
+            'frames': [] # Placeholder for your frames data
+        }
+
+        self.audio_stream = pa.open(format=voc_data['format'],
+                            channels=voc_data['channels'],
+                            rate=voc_data['rate'],
+                            output=True)
+    
+        self.ordered_stream = OrderedStream()
+
+        speech_key = os.getenv('SPEECH_KEY')
+        service_region = os.getenv('SPEECH_REGION')
+
+        # Creates an instance of a speech config with specified subscription key and service region.
+        self.speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=service_region)
+
+        # Setup the audio player
+        self.audio_player = threading.Thread(target=self.play_from_stream, args=())
+        self.audio_player.start()
+
+    def play_from_stream(self):
+        while True:
+            if not self.ordered_stream.empty():
+                data = self.ordered_stream.read()
+                if data is not None and len(data) > 0:
+                    # Convert the data from a list of bytes to a single bytes objects
+                    # TODO Ugh the bottle necks is this lol
+                    self.audio_stream.write(b''.join(data))
+ 
+    def send(self, text):
+        # generate audio in a separate thread
+        t = threading.Thread(target=self.generate_audio, args=(text, self.idx))
+        self.idx += 1
+        t.start()
+        return t
+
+    def generate_audio(self, text, idx):
+
+        stream_callback = PushAudioOutputStreamSampleCallback(self.ordered_stream, self.lock, idx)
+        push_stream = speechsdk.audio.PushAudioOutputStream(stream_callback)
+        stream_config = speechsdk.audio.AudioOutputConfig(stream=push_stream)
+        speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=self.speech_config, audio_config=stream_config)
+
+        result = speech_synthesizer.speak_text_async(text).get()
+
+        # Check result
+        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            print("Speech synthesized for text [{}], and the audio was written to output stream.".format(text))
+        elif result.reason == speechsdk.ResultReason.Canceled:
+            cancellation_details = result.cancellation_details
+            print("Speech synthesis canceled: {}".format(cancellation_details.reason))
+            if cancellation_details.reason == speechsdk.CancellationReason.Error:
+                print("Error details: {}".format(cancellation_details.error_details))
+
+        # Destroys result which is necessary for destroying speech synthesizer
+        del result
+
+        print(f"TTS on {text} done")
+
+        # Destroys the synthesizer in order to close the output stream.
+        del speech_synthesizer
+
+    def __del__(self):
+        self.audio_stream.close()
+        pa.terminate()
+
+class TTS:
+
     def __init__(self):
         self.lock = threading.Lock()
         mpv_command = ["mpv", "--no-cache", "--no-terminal", "--", "fd://0"]
@@ -117,7 +269,7 @@ class Translator:
         self.untranslated_conversation_history = ""
         self.translated_conversation_history = ''
 
-        self.tts = TTS()
+        self.tts = AzureTTS()
 
     def send_to_tts(self, text):
         self.tts.send(text)
@@ -153,8 +305,14 @@ class Translator:
 
 def main():
     translator = Translator()
-    translator.send_to_tts("What is your favorite color.")
-    translator.send_to_tts("My favorite color is blue!")
+    translator.send_to_tts("What")
+    translator.send_to_tts("is")
+    translator.send_to_tts("your")
+    translator.send_to_tts("favorite")
+    translator.send_to_tts("color")
+    translator.send_to_tts("I thought you were great")
+    translator.send_to_tts("but then I figured out the truth")
+
 
 if __name__ == '__main__':
     main()
