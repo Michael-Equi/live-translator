@@ -30,6 +30,21 @@ class OrderedStream:
         
     def empty(self):
         return len(self.buffer) == 0
+    
+    def __len__(self):
+        length = 0
+        self.lock.acquire()
+        for value in self.buffer.values():
+            for byts in value:
+                length += len(byts)
+        self.lock.release()
+        return length
+    
+    def __sizeof__(self) -> int:
+        return len(self.buffer)
+    
+    def get_read_idx(self):
+        return self.read_idx
 
     def write(self, idx, buffer):
         self.lock.acquire()
@@ -134,6 +149,7 @@ class AzureTTS:
                     # Remove any zeros from the begining and end of data
                     bytes_data = bytes_data.lstrip(b'\x00').rstrip(b'\x00')
                     self.audio_stream.write(bytes_data)
+            time.sleep(0.1)
  
     def send(self, text):
         # generate audio in a separate thread
@@ -141,6 +157,9 @@ class AzureTTS:
         self.idx += 1
         t.start()
         return t
+    
+    def get_buffer_size(self):
+        return self.idx - self.ordered_stream.get_read_idx()
 
     def generate_audio(self, text, idx):
 
@@ -263,7 +282,7 @@ def translate(left_to_translate, translated_conversation_history, untranslated_c
 
     # Getting the translated text
     translated_text = tokenizer.decode(tokens_list, skip_special_tokens=True)
-    return translated_text, log_probabilities
+    return translated_text, [tokenizer.decode([x]) for x in tokens_list], log_probabilities
 
 class Translator:
     def __init__(self) -> None:
@@ -465,14 +484,48 @@ def process_utterances():
 
 
 def main():
+    # left_to_translate = "大红狗"
+    # untranslated_conversation_history = ""
+    # translated_conversation_history = ""
+    # translated_text, tokens, logprobs = translate(left_to_translate, translated_conversation_history, untranslated_conversation_history)
+    # print(translated_text)
+    # print(tokens)
+    # print(logprobs)
+    # print(min(logprobs), sum(logprobs) / len(logprobs))
     translator = Translator()
-    translator.send_to_tts("Hello")
-    translator.send_to_tts("my")
-    translator.send_to_tts("name")
-    translator.send_to_tts("is")
-    translator.send_to_tts("John!")
-    translator.send_to_tts("What is your favorite")
-    translator.send_to_tts("color. My favorite color is blue!")
+    # translator.send_to_tts("Hello")
+    # translator.send_to_tts("my")
+    # translator.send_to_tts("name")
+    # translator.send_to_tts("is")
+    # translator.send_to_tts("John!")
+    # translator.send_to_tts("What is your favorite")
+    # translator.send_to_tts("color. My favorite color is blue!")
+    import openai
+    openai.api_key = os.environ["OPENAI_API_KEY"]
+    openai.organization = os.environ["OPENAI_ORG"]
+
+    pattern = re.compile(r'[a-zA-Z]')
+
+    question = input("Question for LLM: ") 
+    messages=[{"role": "user","content": question}]
+    next_chunk = ""
+    starting = True
+    for chunk in openai.ChatCompletion.create(model="gpt-4", messages=messages, stream=True):
+        content = chunk["choices"][0].get("delta", {}).get("content")
+        if content is not None:
+            if len(content) > 0:
+                next_chunk += content
+
+                # This determines maximum response latency
+                # Can change this to wait for punctuation or a newline but this may result in unpredictable latencies
+                if starting and len(next_chunk) < 30:
+                    continue
+                elif starting:
+                    starting = False
+
+                if translator.tts.get_buffer_size() < 2 and pattern.search(next_chunk):
+                    translator.send_to_tts(next_chunk.strip(' '))
+                    next_chunk = ""
 
 if __name__ == '__main__':
     main()
